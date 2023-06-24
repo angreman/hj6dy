@@ -3,12 +3,35 @@
  * @param text 通知头
  * @param desp 通知体
  * @param params 某些推送通知方式点击弹窗可跳转, 例：{ url: 'https://abc.com' }
+ * @param author 作者仓库等信息  例：`本通知 By：https://github.com/whyour/qinglong`
+ 部分变量设置
+## 拆分通知
+export BEANCHANGE_PERSENT="10"
+## 如果通知标题在此变量里面存在(&隔开),则用屏蔽不发送通知
+export NOTIFY_SKIP_LIST="京东CK检测&京东资产变动"
+## 当接收到发送CK失效通知和Ninja 运行通知时候执行子线程任务
+export NOTIFY_CKTASK="jd_CheckCK.js"
+## 如果此变量(&隔开)的关键字在通知内容里面存在,则屏蔽不发送通知.
+export NOTIFY_SKIP_TEXT="忘了种植&异常"
+## 屏蔽任务脚本的ck失效通知
+export NOTIFY_NOCKFALSE="true"
+## 服务器空数据等错误不触发通知
+export CKNOWARNERROR="true"
+## 屏蔽青龙登陆成功通知，登陆失败不屏蔽
+export NOTIFY_NOLOGINSUCCESS="true"
+## 通知底部显示
+export NOTIFY_AUTHOR="来源于：https://github.com/KingRan/KR"
+## 增加NOTIFY_AUTHOR_BLANK 环境变量，控制不显示底部信息
+export NOTIFY_AUTHOR_BLANK="true"
+## 增加NOTIFY_AUTOCHECKCK为true才开启通知脚本内置的自动禁用过期ck
+export NOTIFY_AUTOCHECKCK=“true”
  */
+//详细说明参考 https://github.com/ccwav/QLScript2.
 const querystring = require('querystring');
 const exec = require('child_process').exec;
 const $ = new Env();
 const timeout = 15000; //超时时间(单位毫秒)
-console.log("加载sendNotify，当前版本: 20220327");
+console.log("加载sendNotify，当前版本: 20230506V2");
 // =======================================go-cqhttp通知设置区域===========================================
 //gobot_url 填写请求地址http://127.0.0.1/send_private_msg
 //gobot_token 填写在go-cqhttp文件设置的访问密钥
@@ -78,8 +101,6 @@ let IGOT_PUSH_KEY = '';
 //PUSH_PLUS_USER： 一对多推送的“群组编码”（一对多推送下面->您的群组(如无则新建)->群组编码，如果您是创建群组人。也需点击“查看二维码”扫描绑定，否则不能接受群组消息推送）
 let PUSH_PLUS_TOKEN = '';
 let PUSH_PLUS_USER = '';
-let PUSH_PLUS_TOKEN_hxtrip = '';
-let PUSH_PLUS_USER_hxtrip = '';
 
 // ======================================= WxPusher 通知设置区域 ===========================================
 // 此处填你申请的 appToken. 官方文档：https://wxpusher.zjiecode.com/docs
@@ -106,14 +127,12 @@ let GOTIFY_URL = '';
 let GOTIFY_TOKEN = '';
 let GOTIFY_PRIORITY = 0;
 
-/**
- * sendNotify 推送通知功能
- * @param text 通知头
- * @param desp 通知体
- * @param params 某些推送通知方式点击弹窗可跳转, 例：{ url: 'https://abc.com' }
- * @param author 作者仓库等信息  例：`本通知 By：https://github.com/whyour/qinglong`
- * @returns {Promise<unknown>}
- */
+// =======================================BncrBot通知设置区域==============================================
+//BncrHost 填写BncrHost地址,如https://192.168.31.192:9090
+//BncrToken 填写Bncr的消息应用Token
+let BncrHost = '';
+let BncrToken = '';
+
 let PushErrorTime = 0;
 let strTitle = "";
 let ShowRemarkType = "1";
@@ -124,12 +143,19 @@ const {
     getEnvs,
     DisableCk,
     getEnvByPtPin
-} = require('./utils/ql');
+} = require('./ql');
 const fs = require('fs');
-
 let isnewql = fs.existsSync('/ql/data/config/auth.json');
-let strCKFile = isnewql ? '/ql/data/scripts/CKName_cache.json' : '/ql/scripts/CKName_cache.json';
-let strUidFile = isnewql ? '/ql/data/scripts/CK_WxPusherUid.json' : '/ql/scripts/CK_WxPusherUid.json';
+let strCKFile = "";
+let strUidFile = "";
+if (isnewql) {
+    strCKFile = '/ql/data/scripts/CKName_cache.json';
+    strUidFile = '/ql/data/scripts/CK_WxPusherUid.json';
+} else {
+    strCKFile = '/ql/scripts/CKName_cache.json';
+    strUidFile = '/ql/scripts/CK_WxPusherUid.json';
+}
+
 
 let Fileexists = fs.existsSync(strCKFile);
 let TempCK = [];
@@ -141,6 +167,7 @@ if (Fileexists) {
         TempCK = JSON.parse(TempCK);
     }
 }
+
 let UidFileexists = fs.existsSync(strUidFile);
 let TempCKUid = [];
 if (UidFileexists) {
@@ -169,10 +196,9 @@ if (process.env.NOTIFY_SHOWNAMETYPE) {
     if (ShowRemarkType == "4")
         console.log("检测到显示备注名称，格式为: 备注");
 }
-async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "") {
+async function sendNotify(text, desp, params = {}, author = '\n\n本通知 By https://github.com/KingRan/KR',strsummary="") {
     console.log(`开始发送通知...`);
 
-    //NOTIFY_FILTERBYFILE
     if (process.env.NOTIFY_FILTERBYFILE) {
         var no_notify = process.env.NOTIFY_FILTERBYFILE.split('&');
         if (module.parent.filename) {
@@ -213,8 +239,6 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
         IGOT_PUSH_KEY = '';
         PUSH_PLUS_TOKEN = '';
         PUSH_PLUS_USER = '';
-        PUSH_PLUS_TOKEN_hxtrip = '';
-        PUSH_PLUS_USER_hxtrip = '';
         Notify_CKTask = "";
         Notify_SkipText = [];
 
@@ -228,10 +252,10 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
         var Use_qywxamNotify = true;
         var Use_iGotNotify = true;
         var Use_gobotNotify = true;
-        var Use_pushPlushxtripNotify = true;
         var Use_WxPusher = true;
         var strtext = text;
         var strdesp = desp;
+        var titleIndex = -1;
         if (process.env.NOTIFY_NOCKFALSE) {
             Notify_NoCKFalse = process.env.NOTIFY_NOCKFALSE;
         }
@@ -276,14 +300,14 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                     if (temptest) {
                         if (temptest.status == 0) {
                             isLogin = true;
-                            await checkCookie(temptest.value);
+                            await isLoginByX1a0He(temptest.value);
                             if (!isLogin) {
                                 var tempid = 0;
                                 if (temptest._id) {
                                     tempid = temptest._id;
                                 }
                                 if (temptest.id) {
-                                    tempid =temptest.id;
+                                    tempid = temptest.id;
                                 }
                                 const DisableCkBody = await DisableCk(tempid);
                                 strPtPin = temptest.value;
@@ -338,13 +362,11 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                                 }
                                 if (process.env.CHECKCK_ALLNOTIFY) {
                                     strAllNotify = process.env.CHECKCK_ALLNOTIFY;
-                                    /*
-                                    if (strTempNotify.length > 0) {
-                                        for (var TempNotifyl in strTempNotify) {
-                                            strAllNotify += strTempNotify[TempNotifyl] + '\n';
-                                        }
+                                    /* if (strTempNotify.length > 0) {
+                                    for (var TempNotifyl in strTempNotify) {
+                                    strAllNotify += strTempNotify[TempNotifyl] + '\n';
                                     }
-                                    */
+                                    }*/
                                     console.log(`检测到设定了温馨提示,将在推送信息中置顶显示...`);
                                     strAllNotify = `\n【✨✨✨✨温馨提示✨✨✨✨】\n` + strAllNotify;
                                     console.log(strAllNotify);
@@ -391,20 +413,12 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                     return;
             }
         }
+
         if (strtext.indexOf("cookie已失效") != -1 || strdesp.indexOf("重新登录获取") != -1 || strtext == "Ninja 运行通知") {
             if (Notify_NoCKFalse == "true" && text != "Ninja 运行通知") {
                 console.log(`检测到NOTIFY_NOCKFALSE变量为true,不发送ck失效通知...`);
                 return;
             }
-        }
-
-        //检查黑名单屏蔽通知
-        const notifySkipList = process.env.NOTIFY_SKIP_LIST ? process.env.NOTIFY_SKIP_LIST.split('&') : [];
-        let titleIndex = notifySkipList.findIndex((item) => item === text);
-
-        if (titleIndex !== -1) {
-            console.log(`${text} 在推送黑名单中，已跳过推送`);
-            return;
         }
 
         if (text.indexOf("已可领取") != -1) {
@@ -427,6 +441,7 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
         if (text.indexOf("任务") != -1 && (text.indexOf("新增") != -1 || text.indexOf("删除") != -1)) {
             strTitle = "脚本任务更新";
         }
+
         if (strTitle) {
             const notifyRemindList = process.env.NOTIFY_NOREMIND ? process.env.NOTIFY_NOREMIND.split('&') : [];
             titleIndex = notifyRemindList.findIndex((item) => item === strTitle);
@@ -439,7 +454,6 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
         } else {
             strTitle = text;
         }
-
         if (Notify_NoLoginSuccess == "true") {
             if (desp.indexOf("登陆成功") != -1) {
                 console.log(`登陆成功不推送`);
@@ -452,54 +466,36 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
             var strPtPin = await GetPtPin(text);
             var strdecPtPin = decodeURIComponent(strPtPin);
             if (strPtPin) {
-                await sendNotifybyWxPucher("汪汪乐园领取通知", `【京东账号】${strdecPtPin}\n当前等级: 30\n已自动领取最高等级奖励\n请前往京东极速版APP查看使用优惠券\n活动入口：京东极速版APP->我的->优惠券->京券`, strdecPtPin);
+                await sendNotifybyWxPucher("汪汪乐园领取通知", `【京东账号】${strdecPtPin}\n当前等级: 30\n请自行去解锁新场景,奖励领取方式如下:\n极速版APP->我的->汪汪乐园,点击左上角头像，点击中间靠左的现金奖励图标，弹出历史奖励中点击领取.`, strdecPtPin);
             }
         }
 
         console.log("通知标题: " + strTitle);
 
-        //检查脚本名称是否需要通知到Group2,Group2读取原环境配置的变量名后加2的值.例如: QYWX_AM2
-        const notifyGroup2List = process.env.NOTIFY_GROUP2_LIST ? process.env.NOTIFY_GROUP2_LIST.split('&') : [];
-        const titleIndex2 = notifyGroup2List.findIndex((item) => item === strTitle);
-        const notifyGroup3List = process.env.NOTIFY_GROUP3_LIST ? process.env.NOTIFY_GROUP3_LIST.split('&') : [];
-        const titleIndexGp3 = notifyGroup3List.findIndex((item) => item === strTitle);
-        const notifyGroup4List = process.env.NOTIFY_GROUP4_LIST ? process.env.NOTIFY_GROUP4_LIST.split('&') : [];
-        const titleIndexGp4 = notifyGroup4List.findIndex((item) => item === strTitle);
-        const notifyGroup5List = process.env.NOTIFY_GROUP5_LIST ? process.env.NOTIFY_GROUP5_LIST.split('&') : [];
-        const titleIndexGp5 = notifyGroup5List.findIndex((item) => item === strTitle);
-        const notifyGroup6List = process.env.NOTIFY_GROUP6_LIST ? process.env.NOTIFY_GROUP6_LIST.split('&') : [];
-        const titleIndexGp6 = notifyGroup6List.findIndex((item) => item === strTitle);
-        const notifyGroup7List = process.env.NOTIFY_GROUP7_LIST ? process.env.NOTIFY_GROUP7_LIST.split('&') : [];
-        const titleIndexGp7 = notifyGroup7List.findIndex((item) => item === strTitle);
+        //检查黑名单屏蔽通知
+        const notifySkipList = process.env.NOTIFY_SKIP_LIST ? process.env.NOTIFY_SKIP_LIST.split('&') : [];
+        titleIndex = notifySkipList.findIndex((item) => item === strTitle);
 
-        if (titleIndex2 !== -1) {
-            console.log(`${strTitle} 在群组2推送名单中，初始化群组推送`);
-            UseGroupNotify = 2;
+        if (titleIndex !== -1) {
+            console.log(`${strTitle} 在推送黑名单中，已跳过推送`);
+            return;
         }
-        if (titleIndexGp3 !== -1) {
-            console.log(`${strTitle} 在群组3推送名单中，初始化群组推送`);
-            UseGroupNotify = 3;
+
+        //检查脚本名称是否需要通知到Group2,Group2读取原环境配置的变量名后加2的值.例如: QYWX_AM2
+        for (lncount = 2; lncount < 20; lncount++) {
+            if (process.env["NOTIFY_GROUP" + lncount + "_LIST"]) {
+                const strtemp = process.env["NOTIFY_GROUP" + lncount + "_LIST"];
+                const notifyGroupList = strtemp ? strtemp.split('&') : [];
+                const titleIndex = notifyGroupList.findIndex((item) => item === strTitle);
+                if (titleIndex !== -1) {
+                    console.log(`${strTitle} 在群组${lncount}推送名单中，初始化群组推送`);
+                    UseGroupNotify = lncount;
+                }
+            }
         }
-        if (titleIndexGp4 !== -1) {
-            console.log(`${strTitle} 在群组4推送名单中，初始化群组推送`);
-            UseGroupNotify = 4;
-        }
-        if (titleIndexGp5 !== -1) {
-            console.log(`${strTitle} 在群组5推送名单中，初始化群组推送`);
-            UseGroupNotify = 5;
-        }
-        if (titleIndexGp6 !== -1) {
-            console.log(`${strTitle} 在群组6推送名单中，初始化群组推送`);
-            UseGroupNotify = 6;
-        }
-        if (titleIndexGp7 !== -1) {
-            console.log(`${strTitle} 在群组7推送名单中，初始化群组推送`);
-            UseGroupNotify = 7;
-        }
+
         if (process.env.NOTIFY_CUSTOMNOTIFY) {
             strCustom = process.env.NOTIFY_CUSTOMNOTIFY;
-        }
-        if (strCustom) {
             strCustomArr = strCustom.replace(/^\[|\]$/g, "").split(",");
             strCustomTempArr = [];
             for (var Tempj in strCustomArr) {
@@ -507,40 +503,16 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                 if (strCustomTempArr.length > 1) {
                     if (strTitle == strCustomTempArr[0]) {
                         console.log("检测到自定义设定,开始执行配置...");
-                        if (strCustomTempArr[1] == "组1") {
-                            console.log("自定义设定强制使用组1配置通知...");
+                        if (strCustomTempArr[1].indexOf("组") != -1) {
+                            UseGroupNotify = strCustomTempArr[1].replace("组", "") * 1;
+                            console.log("自定义设定强制使用组" + UseGroupNotify + "配置通知...");
+                        } else {
                             UseGroupNotify = 1;
                         }
-                        if (strCustomTempArr[1] == "组2") {
-                            console.log("自定义设定强制使用组2配置通知...");
-                            UseGroupNotify = 2;
-                        }
-                        if (strCustomTempArr[1] == "组3") {
-                            console.log("自定义设定强制使用组3配置通知...");
-                            UseGroupNotify = 3;
-                        }
-                        if (strCustomTempArr[1] == "组4") {
-                            console.log("自定义设定强制使用组4配置通知...");
-                            UseGroupNotify = 4;
-                        }
-                        if (strCustomTempArr[1] == "组5") {
-                            console.log("自定义设定强制使用组5配置通知...");
-                            UseGroupNotify = 5;
-                        }
-                        if (strCustomTempArr[1] == "组6") {
-                            console.log("自定义设定强制使用组6配置通知...");
-                            UseGroupNotify = 6;
-                        }
-                        if (strCustomTempArr[1] == "组7") {
-                            console.log("自定义设定强制使用组6配置通知...");
-                            UseGroupNotify = 7;
-                        }
-
                         if (strCustomTempArr.length > 2) {
                             console.log("关闭所有通知变量...");
                             Use_serverNotify = false;
                             Use_pushPlusNotify = false;
-                            Use_pushPlushxtripNotify = false;
                             Use_BarkNotify = false;
                             Use_tgBotNotify = false;
                             Use_ddBotNotify = false;
@@ -559,10 +531,6 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                                     case "pushplus":
                                         Use_pushPlusNotify = true;
                                         console.log("自定义设定启用pushplus(推送加)进行通知...");
-                                        break;
-                                    case "pushplushxtrip":
-                                        Use_pushPlushxtripNotify = true;
-                                        console.log("自定义设定启用pushplus_hxtrip(推送加)进行通知...");
                                         break;
                                     case "Bark":
                                         Use_BarkNotify = true;
@@ -604,769 +572,128 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                     }
                 }
             }
-
         }
-
-        //console.log("UseGroup2 :"+UseGroup2);
-        //console.log("UseGroup3 :"+UseGroup3);
-
-
-        switch (UseGroupNotify) {
-            case 1:
-                if (process.env.GOBOT_URL && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL;
-                }
-                if (process.env.GOBOT_TOKEN && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN;
-                }
-                if (process.env.GOBOT_QQ && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ;
-                }
-
-                if (process.env.PUSH_KEY && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY;
-                }
-
-                if (process.env.WP_APP_TOKEN && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN;
-                }
-
-                if (process.env.WP_TOPICIDS && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS;
-                }
-
-                if (process.env.WP_UIDS && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS;
-                }
-
-                if (process.env.WP_URL && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL;
-                }
-                if (process.env.BARK_PUSH && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH.indexOf('https') > -1 || process.env.BARK_PUSH.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH}`;
+        if (desp) {
+            for (lncount = 2; lncount < 20; lncount++) {
+                if (process.env["NOTIFY_INCLUDE_TEXT" + lncount]) {
+                    Notify_IncludeText = process.env["NOTIFY_INCLUDE_TEXT" + lncount].split('&');
+                    if (Notify_IncludeText.length > 0) {
+                        for (var Templ in Notify_IncludeText) {
+                            if (desp.indexOf(Notify_IncludeText[Templ]) != -1) {
+                                console.log("检测内容到内容存在组别推送的关键字(" + Notify_IncludeText[Templ] + ")，将推送到组" + lncount + "...");
+                                UseGroupNotify = lncount;
+                                break;
+                            }
+                        }
                     }
-                    if (process.env.BARK_SOUND) {
-                        BARK_SOUND = process.env.BARK_SOUND;
-                    }
-                    if (process.env.BARK_GROUP) {
-                        BARK_GROUP = process.env.BARK_GROUP;
-                    }
-                } else {
-                    if (BARK_PUSH && BARK_PUSH.indexOf('https') === -1 && BARK_PUSH.indexOf('http') === -1 && Use_BarkNotify) {
-                        //兼容BARK本地用户只填写设备码的情况
-                        BARK_PUSH = `https://api.day.app/${BARK_PUSH}`;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
-                }
-                if (process.env.TG_USER_ID && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID;
-                }
-                if (process.env.TG_PROXY_AUTH && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH;
-                if (process.env.TG_PROXY_HOST && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST;
-                if (process.env.TG_PROXY_PORT && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT;
-                if (process.env.TG_API_HOST && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST;
-
-                if (process.env.DD_BOT_TOKEN && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN;
-                    if (process.env.DD_BOT_SECRET) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET;
-                    }
-                }
-
-                if (process.env.QYWX_KEY && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY;
-                }
-
-                if (process.env.QYWX_AM && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM;
-                }
-
-                if (process.env.IGOT_PUSH_KEY && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN;
-                }
-                if (process.env.PUSH_PLUS_USER && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip;
-                }
-                if (process.env.GOTIFY_URL) {
-                    GOTIFY_URL = process.env.GOTIFY_URL;
-                }
-                if (process.env.GOTIFY_TOKEN) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN;
-                }
-                if (process.env.GOTIFY_PRIORITY) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY;
-                }
-
-                break;
-
-            case 2:
-                //==========================第二套环境变量赋值=========================
-
-                if (process.env.GOBOT_URL2 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL2;
-                }
-                if (process.env.GOBOT_TOKEN2 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN2;
-                }
-                if (process.env.GOBOT_QQ2 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ2;
-                }
-
-                if (process.env.PUSH_KEY2 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY2;
-                }
-
-                if (process.env.WP_APP_TOKEN2 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN2;
-                }
-
-                if (process.env.WP_TOPICIDS2 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS2;
-                }
-
-                if (process.env.WP_UIDS2 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS2;
-                }
-
-                if (process.env.WP_URL2 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL2;
-                }
-                if (process.env.BARK_PUSH2 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH2.indexOf('https') > -1 || process.env.BARK_PUSH2.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH2;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH2}`;
-                    }
-                    if (process.env.BARK_SOUND2) {
-                        BARK_SOUND = process.env.BARK_SOUND2;
-                    }
-                    if (process.env.BARK_GROUP2) {
-                        BARK_GROUP = process.env.BARK_GROUP2;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN2 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN2;
-                }
-                if (process.env.TG_USER_ID2 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID2;
-                }
-                if (process.env.TG_PROXY_AUTH2 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH2;
-                if (process.env.TG_PROXY_HOST2 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST2;
-                if (process.env.TG_PROXY_PORT2 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT2;
-                if (process.env.TG_API_HOST2 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST2;
-
-                if (process.env.DD_BOT_TOKEN2 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN2;
-                    if (process.env.DD_BOT_SECRET2) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET2;
-                    }
-                }
-
-                if (process.env.QYWX_KEY2 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY2;
-                }
-
-                if (process.env.QYWX_AM2 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM2;
-                }
-
-                if (process.env.IGOT_PUSH_KEY2 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY2;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN2 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN2;
-                }
-                if (process.env.PUSH_PLUS_USER2 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER2;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip2 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip2;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip2 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip2;
-                }
-                if (process.env.GOTIFY_URL2) {
-                    GOTIFY_URL = process.env.GOTIFY_URL2;
-                }
-                if (process.env.GOTIFY_TOKEN2) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN2;
-                }
-                if (process.env.GOTIFY_PRIORITY2) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY2;
-                }
-                break;
-
-            case 3:
-                //==========================第三套环境变量赋值=========================
-
-                if (process.env.GOBOT_URL3 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL3;
-                }
-                if (process.env.GOBOT_TOKEN3 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN3;
-                }
-                if (process.env.GOBOT_QQ3 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ3;
-                }
-
-                if (process.env.PUSH_KEY3 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY3;
-                }
-
-                if (process.env.WP_APP_TOKEN3 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN3;
-                }
-
-                if (process.env.WP_TOPICIDS3 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS3;
-                }
-
-                if (process.env.WP_UIDS3 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS3;
-                }
-
-                if (process.env.WP_URL3 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL3;
-                }
-
-                if (process.env.BARK_PUSH3 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH3.indexOf('https') > -1 || process.env.BARK_PUSH3.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH3;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH3}`;
-                    }
-                    if (process.env.BARK_SOUND3) {
-                        BARK_SOUND = process.env.BARK_SOUND3;
-                    }
-                    if (process.env.BARK_GROUP3) {
-                        BARK_GROUP = process.env.BARK_GROUP3;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN3 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN3;
-                }
-                if (process.env.TG_USER_ID3 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID3;
-                }
-                if (process.env.TG_PROXY_AUTH3 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH3;
-                if (process.env.TG_PROXY_HOST3 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST3;
-                if (process.env.TG_PROXY_PORT3 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT3;
-                if (process.env.TG_API_HOST3 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST3;
-
-                if (process.env.DD_BOT_TOKEN3 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN3;
-                    if (process.env.DD_BOT_SECRET3) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET3;
-                    }
-                }
-
-                if (process.env.QYWX_KEY3 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY3;
-                }
-
-                if (process.env.QYWX_AM3 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM3;
-                }
-
-                if (process.env.IGOT_PUSH_KEY3 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY3;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN3 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN3;
-                }
-                if (process.env.PUSH_PLUS_USER3 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER3;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip3 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip3;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip3 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip3;
-                }
-                if (process.env.GOTIFY_URL3) {
-                    GOTIFY_URL = process.env.GOTIFY_URL3;
-                }
-                if (process.env.GOTIFY_TOKEN3) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN3;
-                }
-                if (process.env.GOTIFY_PRIORITY3) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY3;
-                }
-                break;
-
-            case 4:
-                //==========================第四套环境变量赋值=========================
-
-                if (process.env.GOBOT_URL4 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL4;
-                }
-                if (process.env.GOBOT_TOKEN4 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN4;
-                }
-                if (process.env.GOBOT_QQ4 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ4;
-                }
-
-                if (process.env.PUSH_KEY4 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY4;
-                }
-
-                if (process.env.WP_APP_TOKEN4 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN4;
-                }
-
-                if (process.env.WP_TOPICIDS4 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS4;
-                }
-
-                if (process.env.WP_UIDS4 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS4;
-                }
-
-                if (process.env.WP_URL4 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL4;
-                }
-
-                if (process.env.BARK_PUSH4 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH4.indexOf('https') > -1 || process.env.BARK_PUSH4.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH4;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH4}`;
-                    }
-                    if (process.env.BARK_SOUND4) {
-                        BARK_SOUND = process.env.BARK_SOUND4;
-                    }
-                    if (process.env.BARK_GROUP4) {
-                        BARK_GROUP = process.env.BARK_GROUP4;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN4 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN4;
-                }
-                if (process.env.TG_USER_ID4 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID4;
-                }
-                if (process.env.TG_PROXY_AUTH4 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH4;
-                if (process.env.TG_PROXY_HOST4 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST4;
-                if (process.env.TG_PROXY_PORT4 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT4;
-                if (process.env.TG_API_HOST4 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST4;
-
-                if (process.env.DD_BOT_TOKEN4 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN4;
-                    if (process.env.DD_BOT_SECRET4) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET4;
-                    }
-                }
-
-                if (process.env.QYWX_KEY4 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY4;
-                }
-
-                if (process.env.QYWX_AM4 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM4;
-                }
-
-                if (process.env.IGOT_PUSH_KEY4 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY4;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN4 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN4;
-                }
-                if (process.env.PUSH_PLUS_USER4 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER4;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip4 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip4;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip4 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip4;
-                }
-                if (process.env.GOTIFY_URL4) {
-                    GOTIFY_URL = process.env.GOTIFY_URL4;
-                }
-                if (process.env.GOTIFY_TOKEN4) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN4;
-                }
-                if (process.env.GOTIFY_PRIORITY4) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY4;
-                }
-                break;
-
-            case 5:
-                //==========================第五套环境变量赋值=========================
-
-                if (process.env.GOBOT_URL5 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL5;
-                }
-                if (process.env.GOBOT_TOKEN5 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN5;
-                }
-                if (process.env.GOBOT_QQ5 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ5;
-                }
-
-                if (process.env.PUSH_KEY5 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY5;
-                }
-
-                if (process.env.WP_APP_TOKEN5 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN5;
-                }
-
-                if (process.env.WP_TOPICIDS5 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS5;
-                }
-
-                if (process.env.WP_UIDS5 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS5;
-                }
-
-                if (process.env.WP_URL5 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL5;
-                }
-                if (process.env.BARK_PUSH5 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH5.indexOf('https') > -1 || process.env.BARK_PUSH5.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH5;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH5}`;
-                    }
-                    if (process.env.BARK_SOUND5) {
-                        BARK_SOUND = process.env.BARK_SOUND5;
-                    }
-                    if (process.env.BARK_GROUP5) {
-                        BARK_GROUP = process.env.BARK_GROUP5;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN5 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN5;
-                }
-                if (process.env.TG_USER_ID5 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID5;
-                }
-                if (process.env.TG_PROXY_AUTH5 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH5;
-                if (process.env.TG_PROXY_HOST5 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST5;
-                if (process.env.TG_PROXY_PORT5 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT5;
-                if (process.env.TG_API_HOST5 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST5;
-
-                if (process.env.DD_BOT_TOKEN5 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN5;
-                    if (process.env.DD_BOT_SECRET5) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET5;
-                    }
-                }
-
-                if (process.env.QYWX_KEY5 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY5;
-                }
-
-                if (process.env.QYWX_AM5 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM5;
-                }
-
-                if (process.env.IGOT_PUSH_KEY5 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY5;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN5 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN5;
-                }
-                if (process.env.PUSH_PLUS_USER5 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER5;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip5 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip5;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip5 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip5;
-                }
-                if (process.env.GOTIFY_URL5) {
-                    GOTIFY_URL = process.env.GOTIFY_URL5;
-                }
-                if (process.env.GOTIFY_TOKEN5) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN5;
-                }
-                if (process.env.GOTIFY_PRIORITY5) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY5;
-                }
-                break;
-
-            case 6:
-                //==========================第六套环境变量赋值=========================
-
-                if (process.env.GOBOT_URL6 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL6;
-                }
-                if (process.env.GOBOT_TOKEN6 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN6;
-                }
-                if (process.env.GOBOT_QQ6 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ6;
-                }
-
-                if (process.env.PUSH_KEY6 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY6;
-                }
-
-                if (process.env.WP_APP_TOKEN6 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN6;
-                }
-
-                if (process.env.WP_TOPICIDS6 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS6;
-                }
-
-                if (process.env.WP_UIDS6 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS6;
-                }
-
-                if (process.env.WP_URL6 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL6;
-                }
-                if (process.env.BARK_PUSH6 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH6.indexOf('https') > -1 || process.env.BARK_PUSH6.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH6;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH6}`;
-                    }
-                    if (process.env.BARK_SOUND6) {
-                        BARK_SOUND = process.env.BARK_SOUND6;
-                    }
-                    if (process.env.BARK_GROUP6) {
-                        BARK_GROUP = process.env.BARK_GROUP6;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN6 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN6;
-                }
-                if (process.env.TG_USER_ID6 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID6;
-                }
-                if (process.env.TG_PROXY_AUTH6 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH6;
-                if (process.env.TG_PROXY_HOST6 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST6;
-                if (process.env.TG_PROXY_PORT6 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT6;
-                if (process.env.TG_API_HOST6 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST6;
-
-                if (process.env.DD_BOT_TOKEN6 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN6;
-                    if (process.env.DD_BOT_SECRET6) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET6;
-                    }
-                }
-
-                if (process.env.QYWX_KEY6 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY6;
-                }
-
-                if (process.env.QYWX_AM6 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM6;
-                }
-
-                if (process.env.IGOT_PUSH_KEY6 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY6;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN6 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN6;
-                }
-                if (process.env.PUSH_PLUS_USER6 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER6;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip6 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip6;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip6 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip6;
-                }
-                if (process.env.GOTIFY_URL6) {
-                    GOTIFY_URL = process.env.GOTIFY_URL6;
-                }
-                if (process.env.GOTIFY_TOKEN6) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN6;
-                }
-                if (process.env.GOTIFY_PRIORITY6) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY6;
-                }
-                break;
-
-            case 7:
-                //==========================第七套环境变量赋值=========================
-                if (process.env.GOBOT_URL7 && Use_gobotNotify) {
-                    GOBOT_URL = process.env.GOBOT_URL7;
-                }
-                if (process.env.GOBOT_TOKEN7 && Use_gobotNotify) {
-                    GOBOT_TOKEN = process.env.GOBOT_TOKEN7;
-                }
-                if (process.env.GOBOT_QQ7 && Use_gobotNotify) {
-                    GOBOT_QQ = process.env.GOBOT_QQ7;
-                }
-
-                if (process.env.PUSH_KEY7 && Use_serverNotify) {
-                    SCKEY = process.env.PUSH_KEY7;
-                }
-
-                if (process.env.WP_APP_TOKEN7 && Use_WxPusher) {
-                    WP_APP_TOKEN = process.env.WP_APP_TOKEN7;
-                }
-
-                if (process.env.WP_TOPICIDS7 && Use_WxPusher) {
-                    WP_TOPICIDS = process.env.WP_TOPICIDS7;
-                }
-
-                if (process.env.WP_UIDS7 && Use_WxPusher) {
-                    WP_UIDS = process.env.WP_UIDS7;
-                }
-
-                if (process.env.WP_URL7 && Use_WxPusher) {
-                    WP_URL = process.env.WP_URL7;
-                }
-                if (process.env.BARK_PUSH7 && Use_BarkNotify) {
-                    if (process.env.BARK_PUSH7.indexOf('https') > -1 || process.env.BARK_PUSH7.indexOf('http') > -1) {
-                        //兼容BARK自建用户
-                        BARK_PUSH = process.env.BARK_PUSH7;
-                    } else {
-                        BARK_PUSH = `https://api.day.app/${process.env.BARK_PUSH7}`;
-                    }
-                    if (process.env.BARK_SOUND7) {
-                        BARK_SOUND = process.env.BARK_SOUND7;
-                    }
-                    if (process.env.BARK_GROUP7) {
-                        BARK_GROUP = process.env.BARK_GROUP7;
-                    }
-                }
-                if (process.env.TG_BOT_TOKEN7 && Use_tgBotNotify) {
-                    TG_BOT_TOKEN = process.env.TG_BOT_TOKEN7;
-                }
-                if (process.env.TG_USER_ID7 && Use_tgBotNotify) {
-                    TG_USER_ID = process.env.TG_USER_ID7;
-                }
-                if (process.env.TG_PROXY_AUTH7 && Use_tgBotNotify)
-                    TG_PROXY_AUTH = process.env.TG_PROXY_AUTH7;
-                if (process.env.TG_PROXY_HOST7 && Use_tgBotNotify)
-                    TG_PROXY_HOST = process.env.TG_PROXY_HOST7;
-                if (process.env.TG_PROXY_PORT7 && Use_tgBotNotify)
-                    TG_PROXY_PORT = process.env.TG_PROXY_PORT7;
-                if (process.env.TG_API_HOST7 && Use_tgBotNotify)
-                    TG_API_HOST = process.env.TG_API_HOST7;
-
-                if (process.env.DD_BOT_TOKEN7 && Use_ddBotNotify) {
-                    DD_BOT_TOKEN = process.env.DD_BOT_TOKEN7;
-                    if (process.env.DD_BOT_SECRET7) {
-                        DD_BOT_SECRET = process.env.DD_BOT_SECRET7;
-                    }
-                }
-
-                if (process.env.QYWX_KEY7 && Use_qywxBotNotify) {
-                    QYWX_KEY = process.env.QYWX_KEY7;
-                }
-
-                if (process.env.QYWX_AM7 && Use_qywxamNotify) {
-                    QYWX_AM = process.env.QYWX_AM7;
-                }
-
-                if (process.env.IGOT_PUSH_KEY7 && Use_iGotNotify) {
-                    IGOT_PUSH_KEY = process.env.IGOT_PUSH_KEY7;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN7 && Use_pushPlusNotify) {
-                    PUSH_PLUS_TOKEN = process.env.PUSH_PLUS_TOKEN7;
-                }
-                if (process.env.PUSH_PLUS_USER7 && Use_pushPlusNotify) {
-                    PUSH_PLUS_USER = process.env.PUSH_PLUS_USER7;
-                }
-
-                if (process.env.PUSH_PLUS_TOKEN_hxtrip7 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_TOKEN_hxtrip = process.env.PUSH_PLUS_TOKEN_hxtrip7;
-                }
-                if (process.env.PUSH_PLUS_USER_hxtrip7 && Use_pushPlushxtripNotify) {
-                    PUSH_PLUS_USER_hxtrip = process.env.PUSH_PLUS_USER_hxtrip7;
-                }
-                if (process.env.GOTIFY_URL7) {
-                    GOTIFY_URL = process.env.GOTIFY_URL7;
-                }
-                if (process.env.GOTIFY_TOKEN7) {
-                    GOTIFY_TOKEN = process.env.GOTIFY_TOKEN7;
-                }
-                if (process.env.GOTIFY_PRIORITY7) {
-                    GOTIFY_PRIORITY = process.env.GOTIFY_PRIORITY7;
-                }
-                break;
-        }
-
-        //检查是否在不使用Remark进行名称替换的名单
-        const notifySkipRemarkList = process.env.NOTIFY_SKIP_NAMETYPELIST ? process.env.NOTIFY_SKIP_NAMETYPELIST.split('&') : [];
-        const titleIndex3 = notifySkipRemarkList.findIndex((item) => item === strTitle);
-
-        if (text == "京东到家果园互助码:") {
-            ShowRemarkType = "1";
-            if (desp) {
-                var arrTemp = desp.split(",");
-                var allCode = "";
-                for (let k = 0; k < arrTemp.length; k++) {
-                    if (arrTemp[k]) {
-                        if (arrTemp[k].substring(0, 1) != "@")
-                            allCode += arrTemp[k] + ",";
-                    }
-                }
-
-                if (allCode) {
-                    desp += '\n' + '\n' + "格式化后的互助码:" + '\n' + allCode;
                 }
             }
         }
+        if (UseGroupNotify == 1)
+            UseGroupNotify = "";
+
+        if (process.env["GOBOT_URL" + UseGroupNotify] && Use_gobotNotify) {
+            GOBOT_URL = process.env["GOBOT_URL" + UseGroupNotify];
+        }
+        if (process.env["GOBOT_TOKEN" + UseGroupNotify] && Use_gobotNotify) {
+            GOBOT_TOKEN = process.env["GOBOT_TOKEN" + UseGroupNotify];
+        }
+        if (process.env["GOBOT_QQ" + UseGroupNotify] && Use_gobotNotify) {
+            GOBOT_QQ = process.env["GOBOT_QQ" + UseGroupNotify];
+        }
+
+        if (process.env["PUSH_KEY" + UseGroupNotify] && Use_serverNotify) {
+            SCKEY = process.env["PUSH_KEY" + UseGroupNotify];
+        }
+
+        if (process.env["WP_APP_TOKEN" + UseGroupNotify] && Use_WxPusher) {
+            WP_APP_TOKEN = process.env["WP_APP_TOKEN" + UseGroupNotify];
+        }
+
+        if (process.env["WP_TOPICIDS" + UseGroupNotify] && Use_WxPusher) {
+            WP_TOPICIDS = process.env["WP_TOPICIDS" + UseGroupNotify];
+        }
+
+        if (process.env["WP_UIDS" + UseGroupNotify] && Use_WxPusher) {
+            WP_UIDS = process.env["WP_UIDS" + UseGroupNotify];
+        }
+
+        if (process.env["WP_URL" + UseGroupNotify] && Use_WxPusher) {
+            WP_URL = process.env["WP_URL" + UseGroupNotify];
+        }
+        if (process.env["BARK_PUSH" + UseGroupNotify] && Use_BarkNotify) {
+            if (process.env["BARK_PUSH" + UseGroupNotify].indexOf('https') > -1 || process.env["BARK_PUSH" + UseGroupNotify].indexOf('http') > -1) {
+                //兼容BARK自建用户
+                BARK_PUSH = process.env["BARK_PUSH" + UseGroupNotify];
+            } else {
+                //兼容BARK本地用户只填写设备码的情况
+                BARK_PUSH = `https://api.day.app/${process.env["BARK_PUSH" + UseGroupNotify]}`;
+            }
+            if (process.env["BARK_SOUND" + UseGroupNotify]) {
+                BARK_SOUND = process.env["BARK_SOUND" + UseGroupNotify];
+            }
+            if (process.env["BARK_GROUP" + UseGroupNotify]) {
+                BARK_GROUP = process.env;
+            }
+        }
+        if (process.env["TG_BOT_TOKEN" + UseGroupNotify] && Use_tgBotNotify) {
+            TG_BOT_TOKEN = process.env["TG_BOT_TOKEN" + UseGroupNotify];
+        }
+        if (process.env["TG_USER_ID" + UseGroupNotify] && Use_tgBotNotify) {
+            TG_USER_ID = process.env["TG_USER_ID" + UseGroupNotify];
+        }
+		if (process.env["TG_PROXY_AUTH"]) 
+			TG_PROXY_AUTH = process.env["TG_PROXY_AUTH"];
+		if (process.env["TG_PROXY_HOST"]) 
+			TG_PROXY_HOST = process.env["TG_PROXY_HOST"];
+		if (process.env["TG_PROXY_PORT"]) 
+			TG_PROXY_PORT = process.env["TG_PROXY_PORT"];		
+		if (process.env["TG_API_HOST"]) 
+			TG_API_HOST = process.env["TG_API_HOST"];
+
+        if (process.env["DD_BOT_TOKEN" + UseGroupNotify] && Use_ddBotNotify) {
+            DD_BOT_TOKEN = process.env["DD_BOT_TOKEN" + UseGroupNotify];
+            if (process.env["DD_BOT_SECRET" + UseGroupNotify]) {
+                DD_BOT_SECRET = process.env["DD_BOT_SECRET" + UseGroupNotify];
+            }
+        }
+
+        if (process.env["QYWX_KEY" + UseGroupNotify] && Use_qywxBotNotify) {
+            QYWX_KEY = process.env["QYWX_KEY" + UseGroupNotify];
+        }
+
+        if (process.env["QYWX_AM" + UseGroupNotify] && Use_qywxamNotify) {
+            QYWX_AM = process.env["QYWX_AM" + UseGroupNotify];
+        }
+
+        if (process.env["IGOT_PUSH_KEY" + UseGroupNotify] && Use_iGotNotify) {
+            IGOT_PUSH_KEY = process.env["IGOT_PUSH_KEY" + UseGroupNotify];
+        }
+
+        if (process.env["PUSH_PLUS_TOKEN" + UseGroupNotify] && Use_pushPlusNotify) {
+            PUSH_PLUS_TOKEN = process.env["PUSH_PLUS_TOKEN" + UseGroupNotify];
+        }
+        if (process.env["PUSH_PLUS_USER" + UseGroupNotify] && Use_pushPlusNotify) {
+            PUSH_PLUS_USER = process.env["PUSH_PLUS_USER" + UseGroupNotify];
+        }
+        if (process.env["GOTIFY_URL" + UseGroupNotify]) {
+            GOTIFY_URL = process.env["GOTIFY_URL" + UseGroupNotify];
+        }
+        if (process.env["GOTIFY_TOKEN" + UseGroupNotify]) {
+            GOTIFY_TOKEN = process.env["GOTIFY_TOKEN" + UseGroupNotify];
+        }
+        if (process.env["GOTIFY_PRIORITY" + UseGroupNotify]) {
+            GOTIFY_PRIORITY = process.env["GOTIFY_PRIORITY" + UseGroupNotify];
+        }
+        if (process.env["BncrHost" + UseGroupNotify]) {
+            BncrHost = process.env["BncrHost" + UseGroupNotify];
+        }
+        if (process.env["BncrToken" + UseGroupNotify]) {
+            BncrToken = process.env["BncrToken" + UseGroupNotify];
+        }
+        //检查是否在不使用Remark进行名称替换的名单
+        const notifySkipRemarkList = process.env.NOTIFY_SKIP_NAMETYPELIST ? process.env.NOTIFY_SKIP_NAMETYPELIST.split('&') : [];
+        const titleIndex3 = notifySkipRemarkList.findIndex((item) => item === strTitle);
 
         if (ShowRemarkType != "1" && titleIndex3 == -1) {
             console.log("sendNotify正在处理账号Remark.....");
@@ -1442,10 +769,13 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
                             text = text.replace(new RegExp(`${$.UserName}|${$.nickName}`, 'gm'), $.Remark);
                             if (text == "京东资产变动" || text == "京东资产变动#2" || text == "京东资产变动#3" || text == "京东资产变动#4") {
                                 var Tempinfo = "";
-                                if(envs[i].created)
-                                    Tempinfo=getQLinfo(cookie, envs[i].created, envs[i].timestamp, envs[i].remarks);
+                                if (envs[i].created)
+                                    Tempinfo = getQLinfo(cookie, envs[i].created, envs[i].timestamp, envs[i].remarks);
                                 else
-                                    Tempinfo=getQLinfo(cookie, envs[i].createdAt, envs[i].timestamp, envs[i].remarks);
+                                    if (envs[i].updatedAt)
+                                        Tempinfo = getQLinfo(cookie, envs[i].createdAt, envs[i].updatedAt, envs[i].remarks);
+                                    else
+                                        Tempinfo = getQLinfo(cookie, envs[i].createdAt, envs[i].timestamp, envs[i].remarks);
                                 if (Tempinfo) {
                                     $.Remark += Tempinfo;
                                 }
@@ -1479,7 +809,7 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
             }
             console.log("处理完成，开始发送通知...");
             if (strAllNotify) {
-                desp = strAllNotify+"\n" + desp;
+                desp = strAllNotify + "\n" + desp;
             }
         }
     } catch (error) {
@@ -1499,23 +829,8 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
     }
 
     //提供6种通知
-    desp = buildLastDesp(desp, author)
-
+    desp = buildLastDesp(desp, author);
     await serverNotify(text, desp); //微信server酱
-
-    if (PUSH_PLUS_TOKEN_hxtrip) {
-        console.log("hxtrip TOKEN :" + PUSH_PLUS_TOKEN_hxtrip);
-    }
-    if (PUSH_PLUS_USER_hxtrip) {
-        console.log("hxtrip USER :" + PUSH_PLUS_USER_hxtrip);
-    }
-    PushErrorTime = 0;
-    await pushPlusNotifyhxtrip(text, desp); //pushplushxtrip(推送加)
-    if (PushErrorTime > 0) {
-        console.log("等待1分钟后重试.....");
-        await $.wait(60000);
-        await pushPlusNotifyhxtrip(text, desp);
-    }
 
     if (PUSH_PLUS_TOKEN) {
         console.log("PUSH_PLUS TOKEN :" + PUSH_PLUS_TOKEN);
@@ -1548,6 +863,7 @@ async function sendNotify(text, desp, params = {}, author = '\n', strsummary = "
         iGotNotify(text, desp, params), //iGot
         gobotNotify(text, desp), //go-cqhttp
         gotifyNotify(text, desp), //gotify
+        bncrNotify(text, desp), //bncr
         wxpusherNotify(text, desp) // wxpusher
     ]);
 }
@@ -1559,7 +875,7 @@ function getuuid(strRemark, PtPin) {
         if (Tempindex != -1) {
             console.log(PtPin + ": 检测到NVJDC的一对一格式,瑞思拜~!");
             var TempRemarkList = strRemark.split("@@");
-            for (let j = 1; j < TempRemarkList.length; j++) {
+            for (let j = 0; j < TempRemarkList.length; j++) {
                 if (TempRemarkList[j]) {
                     if (TempRemarkList[j].length > 4) {
                         if (TempRemarkList[j].substring(0, 4) == "UID_") {
@@ -1603,7 +919,7 @@ function getQLinfo(strCK, intcreated, strTimestamp, strRemark) {
                     if (TempRemarkList[j]) {
                         if (TempRemarkList[j].length == 13) {
                             DateTimestamp = new Date(parseInt(TempRemarkList[j]));
-                            //console.log(strPtPin + ": 获取登录时间成功:" + GetDateTime(DateTimestamp));
+                            //console.log(strPtPin + ": 获取登录时间成功:" + GetDateTime(DateTimestamp));                            
                             break;
                         }
                     }
@@ -1619,8 +935,8 @@ function getQLinfo(strCK, intcreated, strTimestamp, strRemark) {
         } else {
             strReturn = "\n【登录信息】总挂机" + UseDay + "天(有效期约剩" + LogoutDay + "天)"
         }
-    }
 
+    }
     return strReturn
 }
 
@@ -1641,7 +957,7 @@ function getRemark(strRemark) {
     }
 }
 
-async function sendNotifybyWxPucher(text, desp, PtPin, author = '\n', strsummary = "") {
+async function sendNotifybyWxPucher(text, desp, PtPin, author = '\n\n本通知 By KR仓库', strsummary = "") {
 
     try {
         var Uid = "";
@@ -1700,10 +1016,13 @@ async function sendNotifybyWxPucher(text, desp, PtPin, author = '\n', strsummary
                             $.nickName = $.nickName.replace(new RegExp(`[*]`, 'gm'), "[*]");
 
                             var Tempinfo = "";
-                            if(tempEnv.created)
-                                Tempinfo=getQLinfo(cookie, tempEnv.created, tempEnv.timestamp, tempEnv.remarks);
+                            if (tempEnv.created)
+                                Tempinfo = getQLinfo(cookie, tempEnv.created, tempEnv.timestamp, tempEnv.remarks);
                             else
-                                Tempinfo=getQLinfo(cookie, tempEnv.createdAt, tempEnv.timestamp, tempEnv.remarks);
+                                if (tempEnv.updatedAt)
+                                    Tempinfo = getQLinfo(cookie, tempEnv.createdAt, tempEnv.updatedAt, tempEnv.remarks);
+                                else
+                                    Tempinfo = getQLinfo(cookie, tempEnv.createdAt, tempEnv.timestamp, tempEnv.remarks);
 
                             if (Tempinfo) {
                                 Tempinfo = $.nickName + Tempinfo;
@@ -1725,8 +1044,12 @@ async function sendNotifybyWxPucher(text, desp, PtPin, author = '\n', strsummary
                         }
                     }
                     if (UserRemark) {
-                        text = text + " (" + UserRemark + ")";
+                        text +=  " (" + UserRemark + ")";
+						if(strsummary){
+							strsummary="(" + UserRemark + ")"+strsummary;
+						}
                     }
+					
                     console.log("处理完成，开始发送通知...");
                     desp = buildLastDesp(desp, author);
                     if (strAllNotify) {
@@ -1784,7 +1107,7 @@ async function GetPtPin(text) {
 
 }
 
-async function checkCookie(cookie) {
+async function isLoginByX1a0He(cookie) {
     return new Promise((resolve) => {
         const options = {
             url: 'https://plogin.m.jd.com/cgi-bin/ml/islogin',
@@ -1799,12 +1122,12 @@ async function checkCookie(cookie) {
                 if (data) {
                     data = JSON.parse(data);
                     if (data.islogin === "1") {
-                        console.log(`Cookie有效\n`)
+                        console.log(`使用X1a0He写的接口加强检测: Cookie有效\n`)
                     } else if (data.islogin === "0") {
                         isLogin = false;
-                        console.log(`Cookie无效\n`)
+                        console.log(`使用X1a0He写的接口加强检测: Cookie无效\n`)
                     } else {
-                        console.log(`未知返回，不作变更...\n`)
+                        console.log(`使用X1a0He写的接口加强检测: 未知返回，不作变更...\n`)
                     }
                 }
             } catch (e) {
@@ -1814,6 +1137,43 @@ async function checkCookie(cookie) {
                 resolve();
             }
         });
+    });
+}
+
+function bncrNotify(text, desp) {
+    return new Promise(resolve => {
+        try {
+            if (BncrHost && BncrToken) {
+                const options = {
+                    url: `${BncrHost}/api/qinglongMessage`,
+                    body: `title=${encodeURIComponent(text)}&message=${encodeURIComponent(
+                        desp
+                    )}&token=${BncrToken}`,
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                };
+                $.post(options, (err, resp, data) => {
+                    if (err) {
+                        console.log('\nBncr发送通知调用API失败！！\n');
+                        console.log(err);
+                    } else {
+                        data = JSON.parse(data);
+                        if (data.code === 200) {
+                            console.log('\nBncr发送通知消息成功🎉\n');
+                        } else {
+                            console.log(`\nBncr发送通知调用API失败：${data.msg}\n`);
+                        }
+                    }
+                });
+            } else {
+                resolve();
+            }
+        } catch (e) {
+            $.logErr(`\nBncr发送通知调用API失败：`, e);
+        } finally {
+            resolve();
+        }
     });
 }
 
@@ -1941,13 +1301,13 @@ function serverNotify(text, desp, time = 2100) {
     });
 }
 
-function BarkNotify(text, desp, params = {}) {
+/* function BarkNotify(text, desp, params = {}) {
     return new Promise((resolve) => {
         if (BARK_PUSH) {
             const options = {
                 url: `${BARK_PUSH}/${encodeURIComponent(text)}/${encodeURIComponent(
-                    desp
-                )}?sound=${BARK_SOUND}&group=${BARK_GROUP}&${querystring.stringify(params)}`,
+          desp
+        )}?sound=${BARK_SOUND}&group=${BARK_GROUP}&${querystring.stringify(params)}`,
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
@@ -1977,6 +1337,50 @@ function BarkNotify(text, desp, params = {}) {
             resolve();
         }
     });
+} */
+
+
+/* code from JoveYu */
+function BarkNotify(text, desp, params = {}) {
+    return new Promise((resolve) => {
+        if (BARK_PUSH) {
+            const options = {
+                url: `${BARK_PUSH}`,
+                json: {
+                    title: text,
+                    body: desp,
+                    group: `${BARK_GROUP}`,
+                    icon: `${BARK_ICON}`,
+                    sound: `${BARK_SOUND}`,
+                },
+                headers: {
+                    'Content-Type': 'application/json; charset=utf-8',
+                },
+                timeout,
+            };
+            $.post(options, (err, resp, data) => {
+                try {
+                    if (err) {
+                        console.log('Bark APP发送通知调用API失败！！\n');
+                        console.log(err);
+                    } else {
+                        data = JSON.parse(data);
+                        if (data.code === 200) {
+                            console.log('Bark APP发送通知消息成功🎉\n');
+                        } else {
+                            console.log(`${data.message}\n`);
+                        }
+                    }
+                } catch (e) {
+                    $.logErr(e, resp);
+                } finally {
+                    resolve();
+                }
+            });
+        } else {
+            resolve();
+        }
+    });
 }
 
 function tgBotNotify(text, desp) {
@@ -1987,7 +1391,7 @@ function tgBotNotify(text, desp) {
                 json: {
                     chat_id: `${TG_USER_ID}`,
                     text: `${text}\n\n${desp}`,
-                    disable_web_page_preview:true,
+                    disable_web_page_preview: true
                 },
                 headers: {
                     'Content-Type': 'application/json',
@@ -2005,7 +1409,7 @@ function tgBotNotify(text, desp) {
                         }
                     })
                 }
-                Object.assign(options, {agent})
+                Object.assign(options, { agent })
             }
             $.post(options, (err, resp, data) => {
                 try {
@@ -2015,7 +1419,7 @@ function tgBotNotify(text, desp) {
                     } else {
                         data = JSON.parse(data);
                         if (data.ok) {
-                            console.log('Telegram发送通知消息成功�。\n')
+                            console.log('Telegram发送通知消息成功🎉\n')
                         } else if (data.error_code === 400) {
                             console.log('请主动给bot发送一条消息并检查接收用户ID是否正确。\n')
                         } else if (data.error_code === 401) {
@@ -2150,9 +1554,9 @@ function buildLastDesp(desp, author = '') {
     if (process.env.NOTIFY_AUTHOR_BLANK || !author) {
         return desp.trim();
     } else {
-        // if (!author.match(/本通知 By/)) {
-        //     author = `\n\n本通知 By ${author}`
-        // }
+        if (!author.match(/本通知 By/)) {
+            author = `\n\n本通知 By ${author}`
+        }
         return desp.trim() + author + "\n通知时间: " + GetDateTime(new Date());
     }
 }
@@ -2235,7 +1639,7 @@ function qywxamNotify(text, desp, strsummary = "") {
                                     content_source_url: ``,
                                     content: `${html}`,
                                     digest: `${strsummary}`,
-                                }, ],
+                                },],
                             },
                         };
                 }
@@ -2332,53 +1736,6 @@ function iGotNotify(text, desp, params = {}) {
         }
     });
 }
-function pushPlusNotifyhxtrip(text, desp) {
-    return new Promise((resolve) => {
-        if (PUSH_PLUS_TOKEN_hxtrip) {
-            //desp = `<font size="3">${desp}</font>`;
-
-            desp = desp.replace(/[\n\r]/g, '<br>'); // 默认为html, 不支持plaintext
-            const body = {
-                token: `${PUSH_PLUS_TOKEN_hxtrip}`,
-                title: `${text}`,
-                content: `${desp}`,
-                topic: `${PUSH_PLUS_USER_hxtrip}`,
-            };
-            const options = {
-                url: `http://pushplus.hxtrip.com/send`,
-                body: JSON.stringify(body),
-                headers: {
-                    'Content-Type': ' application/json',
-                },
-                timeout,
-            };
-            $.post(options, (err, resp, data) => {
-                try {
-                    if (err) {
-                        console.log(`hxtrip push+发送${PUSH_PLUS_USER_hxtrip ? '一对多' : '一对一'}通知消息失败！！\n`);
-                        PushErrorTime += 1;
-                        console.log(err);
-                    } else {
-                        if (data.indexOf("200") > -1) {
-                            console.log(`hxtrip push+发送${PUSH_PLUS_USER_hxtrip ? '一对多' : '一对一'}通知消息完成。\n`);
-                            PushErrorTime = 0;
-                        } else {
-                            console.log(`hxtrip push+发送${PUSH_PLUS_USER_hxtrip ? '一对多' : '一对一'}通知消息失败：${data}\n`);
-                            PushErrorTime += 1;
-                        }
-                    }
-                } catch (e) {
-                    $.logErr(e, resp);
-                }
-                finally {
-                    resolve(data);
-                }
-            });
-        } else {
-            resolve();
-        }
-    });
-}
 
 function pushPlusNotify(text, desp) {
     return new Promise((resolve) => {
@@ -2432,14 +1789,8 @@ function pushPlusNotify(text, desp) {
 function wxpusherNotifyByOne(text, desp, strsummary = "") {
     return new Promise((resolve) => {
         if (WP_APP_TOKEN_ONE) {
-            var WPURL = "";
-            if (strsummary) {
-                strsummary = text + "\n" + strsummary;
-            } else {
-                strsummary = text + "\n" + desp;
-            }
-
-            if (strsummary.length > 96) {
+            var WPURL = "";            
+            if (strsummary && strsummary.length > 96) {
                 strsummary = strsummary.substring(0, 95) + "...";
             }
             let uids = [];
@@ -2622,7 +1973,7 @@ function GetnickName() {
                 Accept: "*/*",
                 Connection: "keep-alive",
                 Cookie: cookie,
-                "User-Agent": $.isNode() ? (process.env.JD_USER_AGENT ? process.env.JD_USER_AGENT : (require('./USER_AGENTS').USER_AGENT)) : ($.getdata('JDUA') ? $.getdata('JDUA') : "jdapp;iPhone;9.4.4;14.3;network/4g;Mozilla/5.0 (iPhone; CPU iPhone OS 14_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148;supportJDSHWK/1"),
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36 Edg/106.0.1370.42",
                 "Accept-Language": "zh-cn",
                 "Referer": "https://home.m.jd.com/myJd/newhome.action?sceneval=2&ufc=&",
                 "Accept-Encoding": "gzip, deflate, br"
@@ -2657,18 +2008,19 @@ function GetnickName() {
 }
 
 function GetnickName2() {
-    return new Promise(async(resolve) => {
+    return new Promise(async (resolve) => {
         const options = {
-            url: `https://wxapp.m.jd.com/kwxhome/myJd/home.json?&useGuideModule=0&bizId=&brandId=&fromType=wxapp&timestamp=${Date.now()}`,
-            headers: {
-                Cookie: cookie,
-                'content-type': `application/x-www-form-urlencoded`,
-                Connection: `keep-alive`,
-                'Accept-Encoding': `gzip,compress,br,deflate`,
-                Referer: `https://servicewechat.com/wxa5bf5ee667d91626/161/page-frame.html`,
-                Host: `wxapp.m.jd.com`,
-                'User-Agent': `Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.10(0x18000a2a) NetType/WIFI Language/zh_CN`,
-            },
+            "url": `https://wq.jd.com/user/info/QueryJDUserInfo?sceneval=2`,
+            "headers": {
+                "Accept": "application/json,text/plain, */*",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "zh-cn",
+                "Connection": "keep-alive",
+                "Cookie": cookie,
+                "Referer": "https://wqs.jd.com/my/jingdou/my.shtml?sceneval=2",
+                "User-Agent": $.isNode() ? (process.env.JD_USER_AGENT ? process.env.JD_USER_AGENT : (require('./USER_AGENTS').USER_AGENT)) : ($.getdata('JDUA') ? $.getdata('JDUA') : "jdapp;iPhone;9.4.4;14.3;network/4g;Mozilla/5.0 (iPhone; CPU iPhone OS 14_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148;supportJDSHWK/1")
+            }
         };
         $.post(options, (err, resp, data) => {
             try {
@@ -2677,13 +2029,12 @@ function GetnickName2() {
                 } else {
                     if (data) {
                         data = JSON.parse(data);
-                        if (!data.user) {
+                        if (data['retcode'] === 13) {
                             $.isLogin = false; //cookie过期
-                            return;
+                            return
                         }
-                        const userInfo = data.user;
-                        if (userInfo) {
-                            $.nickName = userInfo.petName;
+                        if (data['retcode'] === 0) {
+                            $.nickName = (data['base'] && data['base'].nickname) || "";
                         }
                     } else {
                         $.log('京东服务器返回空数据');
@@ -2706,4 +2057,275 @@ module.exports = {
 };
 
 // prettier-ignore
-function Env(t,s){return new class{constructor(t,s){this.name=t,this.data=null,this.dataFile="box.dat",this.logs=[],this.logSeparator="\n",this.startTime=(new Date).getTime(),Object.assign(this,s),this.log("",`\ud83d\udd14${this.name}, \u5f00\u59cb!`)}isNode(){return"undefined"!=typeof module&&!!module.exports}isQuanX(){return"undefined"!=typeof $task}isSurge(){return"undefined"!=typeof $httpClient&&"undefined"==typeof $loon}isLoon(){return"undefined"!=typeof $loon}getScript(t){return new Promise(s=>{$.get({url:t},(t,e,i)=>s(i))})}runScript(t,s){return new Promise(e=>{let i=this.getdata("@chavy_boxjs_userCfgs.httpapi");i=i?i.replace(/\n/g,"").trim():i;let o=this.getdata("@chavy_boxjs_userCfgs.httpapi_timeout");o=o?1*o:20,o=s&&s.timeout?s.timeout:o;const[h,a]=i.split("@"),r={url:`http://${a}/v1/scripting/evaluate`,body:{script_text:t,mock_type:"cron",timeout:o},headers:{"X-Key":h,Accept:"*/*"}};$.post(r,(t,s,i)=>e(i))}).catch(t=>this.logErr(t))}loaddata(){if(!this.isNode())return{};{this.fs=this.fs?this.fs:require("fs"),this.path=this.path?this.path:require("path");const t=this.path.resolve(this.dataFile),s=this.path.resolve(process.cwd(),this.dataFile),e=this.fs.existsSync(t),i=!e&&this.fs.existsSync(s);if(!e&&!i)return{};{const i=e?t:s;try{return JSON.parse(this.fs.readFileSync(i))}catch(t){return{}}}}}writedata(){if(this.isNode()){this.fs=this.fs?this.fs:require("fs"),this.path=this.path?this.path:require("path");const t=this.path.resolve(this.dataFile),s=this.path.resolve(process.cwd(),this.dataFile),e=this.fs.existsSync(t),i=!e&&this.fs.existsSync(s),o=JSON.stringify(this.data);e?this.fs.writeFileSync(t,o):i?this.fs.writeFileSync(s,o):this.fs.writeFileSync(t,o)}}lodash_get(t,s,e){const i=s.replace(/\[(\d+)\]/g,".$1").split(".");let o=t;for(const t of i)if(o=Object(o)[t],void 0===o)return e;return o}lodash_set(t,s,e){return Object(t)!==t?t:(Array.isArray(s)||(s=s.toString().match(/[^.[\]]+/g)||[]),s.slice(0,-1).reduce((t,e,i)=>Object(t[e])===t[e]?t[e]:t[e]=Math.abs(s[i+1])>>0==+s[i+1]?[]:{},t)[s[s.length-1]]=e,t)}getdata(t){let s=this.getval(t);if(/^@/.test(t)){const[,e,i]=/^@(.*?)\.(.*?)$/.exec(t),o=e?this.getval(e):"";if(o)try{const t=JSON.parse(o);s=t?this.lodash_get(t,i,""):s}catch(t){s=""}}return s}setdata(t,s){let e=!1;if(/^@/.test(s)){const[,i,o]=/^@(.*?)\.(.*?)$/.exec(s),h=this.getval(i),a=i?"null"===h?null:h||"{}":"{}";try{const s=JSON.parse(a);this.lodash_set(s,o,t),e=this.setval(JSON.stringify(s),i)}catch(s){const h={};this.lodash_set(h,o,t),e=this.setval(JSON.stringify(h),i)}}else e=$.setval(t,s);return e}getval(t){return this.isSurge()||this.isLoon()?$persistentStore.read(t):this.isQuanX()?$prefs.valueForKey(t):this.isNode()?(this.data=this.loaddata(),this.data[t]):this.data&&this.data[t]||null}setval(t,s){return this.isSurge()||this.isLoon()?$persistentStore.write(t,s):this.isQuanX()?$prefs.setValueForKey(t,s):this.isNode()?(this.data=this.loaddata(),this.data[s]=t,this.writedata(),!0):this.data&&this.data[s]||null}initGotEnv(t){this.got=this.got?this.got:require("got"),this.cktough=this.cktough?this.cktough:require("tough-cookie"),this.ckjar=this.ckjar?this.ckjar:new this.cktough.CookieJar,t&&(t.headers=t.headers?t.headers:{},void 0===t.headers.Cookie&&void 0===t.cookieJar&&(t.cookieJar=this.ckjar))}get(t,s=(()=>{})){t.headers&&(delete t.headers["Content-Type"],delete t.headers["Content-Length"]),this.isSurge()||this.isLoon()?$httpClient.get(t,(t,e,i)=>{!t&&e&&(e.body=i,e.statusCode=e.status),s(t,e,i)}):this.isQuanX()?$task.fetch(t).then(t=>{const{statusCode:e,statusCode:i,headers:o,body:h}=t;s(null,{status:e,statusCode:i,headers:o,body:h},h)},t=>s(t)):this.isNode()&&(this.initGotEnv(t),this.got(t).on("redirect",(t,s)=>{try{const e=t.headers["set-cookie"].map(this.cktough.Cookie.parse).toString();this.ckjar.setCookieSync(e,null),s.cookieJar=this.ckjar}catch(t){this.logErr(t)}}).then(t=>{const{statusCode:e,statusCode:i,headers:o,body:h}=t;s(null,{status:e,statusCode:i,headers:o,body:h},h)},t=>s(t)))}post(t,s=(()=>{})){if(t.body&&t.headers&&!t.headers["Content-Type"]&&(t.headers["Content-Type"]="application/x-www-form-urlencoded"),delete t.headers["Content-Length"],this.isSurge()||this.isLoon())$httpClient.post(t,(t,e,i)=>{!t&&e&&(e.body=i,e.statusCode=e.status),s(t,e,i)});else if(this.isQuanX())t.method="POST",$task.fetch(t).then(t=>{const{statusCode:e,statusCode:i,headers:o,body:h}=t;s(null,{status:e,statusCode:i,headers:o,body:h},h)},t=>s(t));else if(this.isNode()){this.initGotEnv(t);const{url:e,...i}=t;this.got.post(e,i).then(t=>{const{statusCode:e,statusCode:i,headers:o,body:h}=t;s(null,{status:e,statusCode:i,headers:o,body:h},h)},t=>s(t))}}time(t){let s={"M+":(new Date).getMonth()+1,"d+":(new Date).getDate(),"H+":(new Date).getHours(),"m+":(new Date).getMinutes(),"s+":(new Date).getSeconds(),"q+":Math.floor(((new Date).getMonth()+3)/3),S:(new Date).getMilliseconds()};/(y+)/.test(t)&&(t=t.replace(RegExp.$1,((new Date).getFullYear()+"").substr(4-RegExp.$1.length)));for(let e in s)new RegExp("("+e+")").test(t)&&(t=t.replace(RegExp.$1,1==RegExp.$1.length?s[e]:("00"+s[e]).substr((""+s[e]).length)));return t}msg(s=t,e="",i="",o){const h=t=>!t||!this.isLoon()&&this.isSurge()?t:"string"==typeof t?this.isLoon()?t:this.isQuanX()?{"open-url":t}:void 0:"object"==typeof t&&(t["open-url"]||t["media-url"])?this.isLoon()?t["open-url"]:this.isQuanX()?t:void 0:void 0;$.isMute||(this.isSurge()||this.isLoon()?$notification.post(s,e,i,h(o)):this.isQuanX()&&$notify(s,e,i,h(o))),this.logs.push("","==============\ud83d\udce3\u7cfb\u7edf\u901a\u77e5\ud83d\udce3=============="),this.logs.push(s),e&&this.logs.push(e),i&&this.logs.push(i)}log(...t){t.length>0?this.logs=[...this.logs,...t]:console.log(this.logs.join(this.logSeparator))}logErr(t,s){const e=!this.isSurge()&&!this.isQuanX()&&!this.isLoon();e?$.log("",`\u2757\ufe0f${this.name}, \u9519\u8bef!`,t.stack):$.log("",`\u2757\ufe0f${this.name}, \u9519\u8bef!`,t)}wait(t){return new Promise(s=>setTimeout(s,t))}done(t={}){const s=(new Date).getTime(),e=(s-this.startTime)/1e3;this.log("",`\ud83d\udd14${this.name}, \u7ed3\u675f! \ud83d\udd5b ${e} \u79d2`),this.log(),(this.isSurge()||this.isQuanX()||this.isLoon())&&$done(t)}}(t,s)}
+function Env(t, s) {
+    return new (class {
+        constructor(t, s) {
+            (this.name = t),
+                (this.data = null),
+                (this.dataFile = 'box.dat'),
+                (this.logs = []),
+                (this.logSeparator = '\n'),
+                (this.startTime = new Date().getTime()),
+                Object.assign(this, s),
+                this.log('', `\ud83d\udd14${this.name}, \u5f00\u59cb!`);
+        }
+        isNode() {
+            return 'undefined' != typeof module && !!module.exports;
+        }
+        isQuanX() {
+            return 'undefined' != typeof $task;
+        }
+        isSurge() {
+            return 'undefined' != typeof $httpClient && 'undefined' == typeof $loon;
+        }
+        isLoon() {
+            return 'undefined' != typeof $loon;
+        }
+        getScript(t) {
+            return new Promise((s) => {
+                $.get({
+                    url: t
+                }, (t, e, i) => s(i));
+            });
+        }
+        runScript(t, s) {
+            return new Promise((e) => {
+                let i = this.getdata('@chavy_boxjs_userCfgs.httpapi');
+                i = i ? i.replace(/\n/g, '').trim() : i;
+                let o = this.getdata('@chavy_boxjs_userCfgs.httpapi_timeout');
+                (o = o ? 1 * o : 20),
+                    (o = s && s.timeout ? s.timeout : o);
+                const [h, a] = i.split('@'),
+                    r = {
+                        url: `http://${a}/v1/scripting/evaluate`,
+                        body: {
+                            script_text: t,
+                            mock_type: 'cron',
+                            timeout: o
+                        },
+                        headers: {
+                            'X-Key': h,
+                            Accept: '*/*'
+                        },
+                    };
+                $.post(r, (t, s, i) => e(i));
+            }).catch((t) => this.logErr(t));
+        }
+        loaddata() {
+            if (!this.isNode())
+                return {}; {
+                (this.fs = this.fs ? this.fs : require('fs')),
+                    (this.path = this.path ? this.path : require('path'));
+                const t = this.path.resolve(this.dataFile),
+                    s = this.path.resolve(process.cwd(), this.dataFile),
+                    e = this.fs.existsSync(t),
+                    i = !e && this.fs.existsSync(s);
+                if (!e && !i)
+                    return {}; {
+                    const i = e ? t : s;
+                    try {
+                        return JSON.parse(this.fs.readFileSync(i));
+                    } catch (t) {
+                        return {};
+                    }
+                }
+            }
+        }
+        writedata() {
+            if (this.isNode()) {
+                (this.fs = this.fs ? this.fs : require('fs')),
+                    (this.path = this.path ? this.path : require('path'));
+                const t = this.path.resolve(this.dataFile),
+                    s = this.path.resolve(process.cwd(), this.dataFile),
+                    e = this.fs.existsSync(t),
+                    i = !e && this.fs.existsSync(s),
+                    o = JSON.stringify(this.data);
+                e ? this.fs.writeFileSync(t, o) : i ? this.fs.writeFileSync(s, o) : this.fs.writeFileSync(t, o);
+            }
+        }
+        lodash_get(t, s, e) {
+            const i = s.replace(/\[(\d+)\]/g, '.$1').split('.');
+            let o = t;
+            for (const t of i)
+                if (((o = Object(o)[t]), void 0 === o))
+                    return e;
+            return o;
+        }
+        lodash_set(t, s, e) {
+            return Object(t) !== t ? t : (Array.isArray(s) || (s = s.toString().match(/[^.[\]]+/g) || []), (s.slice(0, -1).reduce((t, e, i) => (Object(t[e]) === t[e] ? t[e] : (t[e] = Math.abs(s[i + 1]) >> 0 == +s[i + 1] ? [] : {})), t)[s[s.length - 1]] = e), t);
+        }
+        getdata(t) {
+            let s = this.getval(t);
+            if (/^@/.test(t)) {
+                const [, e, i] = /^@(.*?)\.(.*?)$/.exec(t),
+                    o = e ? this.getval(e) : '';
+                if (o)
+                    try {
+                        const t = JSON.parse(o);
+                        s = t ? this.lodash_get(t, i, '') : s;
+                    } catch (t) {
+                        s = '';
+                    }
+            }
+            return s;
+        }
+        setdata(t, s) {
+            let e = !1;
+            if (/^@/.test(s)) {
+                const [, i, o] = /^@(.*?)\.(.*?)$/.exec(s),
+                    h = this.getval(i),
+                    a = i ? ('null' === h ? null : h || '{}') : '{}';
+                try {
+                    const s = JSON.parse(a);
+                    this.lodash_set(s, o, t),
+                        (e = this.setval(JSON.stringify(s), i));
+                } catch (s) {
+                    const h = {};
+                    this.lodash_set(h, o, t),
+                        (e = this.setval(JSON.stringify(h), i));
+                }
+            } else
+                e = $.setval(t, s);
+            return e;
+        }
+        getval(t) {
+            return this.isSurge() || this.isLoon() ? $persistentStore.read(t) : this.isQuanX() ? $prefs.valueForKey(t) : this.isNode() ? ((this.data = this.loaddata()), this.data[t]) : (this.data && this.data[t]) || null;
+        }
+        setval(t, s) {
+            return this.isSurge() || this.isLoon() ? $persistentStore.write(t, s) : this.isQuanX() ? $prefs.setValueForKey(t, s) : this.isNode() ? ((this.data = this.loaddata()), (this.data[s] = t), this.writedata(), !0) : (this.data && this.data[s]) || null;
+        }
+        initGotEnv(t) {
+            (this.got = this.got ? this.got : require('got')),
+                (this.cktough = this.cktough ? this.cktough : require('tough-cookie')),
+                (this.ckjar = this.ckjar ? this.ckjar : new this.cktough.CookieJar()),
+                t && ((t.headers = t.headers ? t.headers : {}), void 0 === t.headers.Cookie && void 0 === t.cookieJar && (t.cookieJar = this.ckjar));
+        }
+        get(t, s = () => { }) {
+            t.headers && (delete t.headers['Content-Type'], delete t.headers['Content-Length']),
+                this.isSurge() || this.isLoon() ? $httpClient.get(t, (t, e, i) => {
+                    !t && e && ((e.body = i), (e.statusCode = e.status)),
+                        s(t, e, i);
+                }) : this.isQuanX() ? $task.fetch(t).then((t) => {
+                    const {
+                        statusCode: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    } = t;
+                    s(null, {
+                        status: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    }, h);
+                }, (t) => s(t)) : this.isNode() && (this.initGotEnv(t), this.got(t).on('redirect', (t, s) => {
+                    try {
+                        const e = t.headers['set-cookie'].map(this.cktough.Cookie.parse).toString();
+                        this.ckjar.setCookieSync(e, null),
+                            (s.cookieJar = this.ckjar);
+                    } catch (t) {
+                        this.logErr(t);
+                    }
+                }).then((t) => {
+                    const {
+                        statusCode: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    } = t;
+                    s(null, {
+                        status: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    }, h);
+                }, (t) => s(t)));
+        }
+        post(t, s = () => { }) {
+            if ((t.body && t.headers && !t.headers['Content-Type'] && (t.headers['Content-Type'] = 'application/x-www-form-urlencoded'), delete t.headers['Content-Length'], this.isSurge() || this.isLoon()))
+                $httpClient.post(t, (t, e, i) => {
+                    !t && e && ((e.body = i), (e.statusCode = e.status)),
+                        s(t, e, i);
+                });
+            else if (this.isQuanX())
+                (t.method = 'POST'), $task.fetch(t).then((t) => {
+                    const {
+                        statusCode: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    } = t;
+                    s(null, {
+                        status: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    }, h);
+                }, (t) => s(t));
+            else if (this.isNode()) {
+                this.initGotEnv(t);
+                const {
+                    url: e,
+                    ...i
+                } = t;
+                this.got.post(e, i).then((t) => {
+                    const {
+                        statusCode: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    } = t;
+                    s(null, {
+                        status: e,
+                        statusCode: i,
+                        headers: o,
+                        body: h
+                    }, h);
+                }, (t) => s(t));
+            }
+        }
+        time(t) {
+            let s = {
+                'M+': new Date().getMonth() + 1,
+                'd+': new Date().getDate(),
+                'H+': new Date().getHours(),
+                'm+': new Date().getMinutes(),
+                's+': new Date().getSeconds(),
+                'q+': Math.floor((new Date().getMonth() + 3) / 3),
+                S: new Date().getMilliseconds(),
+            };
+            /(y+)/.test(t) && (t = t.replace(RegExp.$1, (new Date().getFullYear() + '').substr(4 - RegExp.$1.length)));
+            for (let e in s)
+                new RegExp('(' + e + ')').test(t) && (t = t.replace(RegExp.$1, 1 == RegExp.$1.length ? s[e] : ('00' + s[e]).substr(('' + s[e]).length)));
+            return t;
+        }
+        msg(s = t, e = '', i = '', o) {
+            const h = (t) => !t || (!this.isLoon() && this.isSurge()) ? t : 'string' == typeof t ? this.isLoon() ? t : this.isQuanX() ? {
+                'open-url': t
+            }
+                : void 0 : 'object' == typeof t && (t['open-url'] || t['media-url']) ? this.isLoon() ? t['open-url'] : this.isQuanX() ? t : void 0 : void 0;
+            $.isMute || (this.isSurge() || this.isLoon() ? $notification.post(s, e, i, h(o)) : this.isQuanX() && $notify(s, e, i, h(o))),
+                this.logs.push('', '==============\ud83d\udce3\u7cfb\u7edf\u901a\u77e5\ud83d\udce3=============='),
+                this.logs.push(s),
+                e && this.logs.push(e),
+                i && this.logs.push(i);
+        }
+        log(...t) {
+            t.length > 0 ? (this.logs = [...this.logs, ...t]) : console.log(this.logs.join(this.logSeparator));
+        }
+        logErr(t, s) {
+            const e = !this.isSurge() && !this.isQuanX() && !this.isLoon();
+            e ? $.log('', `\u2757\ufe0f${this.name}, \u9519\u8bef!`, t.stack) : $.log('', `\u2757\ufe0f${this.name}, \u9519\u8bef!`, t);
+        }
+        wait(t) {
+            return new Promise((s) => setTimeout(s, t));
+        }
+        done(t = {}) {
+            const s = new Date().getTime(),
+                e = (s - this.startTime) / 1e3;
+            this.log('', `\ud83d\udd14${this.name}, \u7ed3\u675f! \ud83d\udd5b ${e} \u79d2`),
+                this.log(),
+                (this.isSurge() || this.isQuanX() || this.isLoon()) && $done(t);
+        }
+    })(t, s);
+}
