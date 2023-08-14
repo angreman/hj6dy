@@ -34,8 +34,7 @@ const jdVersion = '10.1.2'
             $.bean = 0
             iphoneVersion = [Math.ceil(Math.random() * 2 + 12), Math.ceil(Math.random() * 4)]
             UA = `jdapp;iPhone;${jdVersion};${Math.ceil(Math.random() * 2 + 12)}.${Math.ceil(Math.random() * 4)};${randomString(40)};network/wifi;model/iPhone12,1;addressid/0;appBuild/167802;jdSupportDarkMode/0;Mozilla/5.0 (iPhone; CPU iPhone OS ${iphoneVersion[0]}_${iphoneVersion[1]} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148;supportJDSHWK/1`
-            UUID = randomString(40);
-            UA =ua.UARAM();
+            UUID = UA.split(';') && UA.split(';')[4] || '';
             console.log(`\n*****开始【京东账号${$.index}】${$.UserName}****\n`);
             await run();
             await $.wait(5000);
@@ -72,7 +71,7 @@ async function takePostRequest(type) {
             break;
         case 'signBeanAct':
             body = `{"fp":"-1","shshshfp":"-1","shshshfpa":"-1","referUrl":"-1","userAgent":"-1","jda":"-1","rnVersion":"3.9"}`;
-            myRequest = await getGetRequest(`signBeanAct`, encodeURIComponent(body));
+            myRequest = await getGetRequest(`signBeanAct`, escape(body));
             break;
         default:
             console.log(`错误${type}`);
@@ -135,7 +134,7 @@ async function dealReturn(type, res) {
     }
 }
 async function getGetRequest(type, body) {
-    let url = `https://api.m.jd.com/client.action?functionId=${type}&body=${body}&appid=ld&client=apple&clientVersion=${ua.UARAM(';')[2]}&networkType=wifi&uuid=${UUID}&openudid=${UUID}`;
+    let url = `https://api.m.jd.com/client.action?functionId=${type}&body=${body}&appid=ld&client=apple&clientVersion=${jdVersion}&networkType=wifi&osVersion=${iphoneVersion[0]}.${iphoneVersion[1]}&uuid=${UUID}&openudid=${UUID}`;
     const method = `GET`;
     const headers = {
         "Accept": "*/*",
