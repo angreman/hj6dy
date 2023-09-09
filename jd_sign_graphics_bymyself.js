@@ -32,7 +32,7 @@ const turnTableId = [
    { "name": "翻牌", "id": 1082, "shopid": 1000004123, "url": "https://sendbeans.jd.com/jump/index/" },//小米
    //{ "name": "翻牌", "id": 1446, "shopid": 1000411104, "url": "https://sendbeans.jd.com/jump/index/" },//祖马龙
    //{ "name": "翻牌", "id": 1452, "shopid": 100391, "url": "https://sendbeans.jd.com/jump/index/" },//特步
-   { "name": "翻牌", "id": 1548, "shopid": 10573836, "url": "https://sendbeans.jd.com/jump/index/" },//蕉内
+   //{ "name": "翻牌", "id": 1548, "shopid": 10573836, "url": "https://sendbeans.jd.com/jump/index/" },//蕉内
    ]
 
 !(async () => {
